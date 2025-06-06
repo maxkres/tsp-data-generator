@@ -14,21 +14,16 @@ from adaptive_tsp.adaptive_tsp import AdaptiveTSP
 def main():
     parser = argparse.ArgumentParser(description="AdaptiveTSP")
     parser.add_argument('--input-csv', type=str, help='CSV: index,x,y')
-    parser.add_argument('--input-json', type=str,
-                        help='JSON (points + matrix) от data_generator')
-    parser.add_argument('--iterations', type=int, default=1000,
-                        help='Число итераций для обучения SOM')
-    parser.add_argument('--output-tour', type=str,
-                        help='CSV-файл для сохранения финального тура (pos,city)')
-    parser.add_argument('--viz-dir', type=str, default=None,
-                        help='Папка для PNG-визуализаций всех этапов (если указано)')
+    parser.add_argument('--input-json', type=str, help='JSON (points + matrix) от data_generator')
+    parser.add_argument('--iterations', type=int, default=1000, help='Число итераций для обучения SOM')
+    parser.add_argument('--output-tour', type=str, help='CSV-файл для сохранения финального тура (pos,city)')
+    parser.add_argument('--viz-dir', type=str, default=None, help='Папка для PNG-визуализаций всех этапов (если указано)')
     args = parser.parse_args()
 
     if not args.input_csv and not args.input_json:
         print("Ошибка: нужно указать либо --input-csv, либо --input-json")
         sys.exit(1)
 
-    # Загружаем точки
     if args.input_json:
         with open(args.input_json, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -37,7 +32,7 @@ def main():
         points = []
         with open(args.input_csv, newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
-            next(reader)  # пропускаем заголовок
+            next(reader)
             for row in reader:
                 _, x, y = row
                 points.append((float(x), float(y)))

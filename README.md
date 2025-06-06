@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-
 # AdaptiveTSP
 
 Краткий TSP-решатель, основанный на адаптивной сетке (SOM) и итеративном улучшении с помощью 2-opt.
@@ -180,4 +178,3 @@ pytest tests
 * `tests/test_adaptive_tsp.py`
 * `tests/test_utils.py`
 ```
->>>>>>> fb8bf9dc1b446bcb84e2d24c82787821568983df

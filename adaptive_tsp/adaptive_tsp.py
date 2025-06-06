@@ -1,3 +1,5 @@
+# File: adaptive_tsp/adaptive_tsp.py
+
 import os
 import csv
 import math
@@ -10,19 +12,47 @@ class AdaptiveTSP:
     def __init__(
         self,
         points,
-        iterations=1000
+        iterations: int = 1000,
+        som_nodes: int = None,
+        som_lr_initial: float = 0.8,
+        som_lr_final: float = 0.01,
+        som_radius_final: float = None
     ):
+        """
+        points: список кортежей (x, y).
+        iterations: число итераций обучения SOM.
+        som_nodes: число узлов в кольцевой карте. Если None, ставится 2 * n_cities.
+        som_lr_initial: начальный коэффициент обучения для SOM.
+        som_lr_final: конечный коэффициент обучения для SOM.
+        som_radius_final: конечный радиус соседства. Если None, вычисляется как половина диагонали bounding box.
+        """
         self.points = list(points)
         self.n_cities = len(self.points)
         self.iterations = iterations
-        self.som_nodes = 2 * self.n_cities
-        self.som_lr_initial = 0.8
-        self.som_lr_final = 0.01
+
+        # Задаём число узлов SOM
+        if som_nodes is None:
+            self.som_nodes = 2 * self.n_cities
+        else:
+            self.som_nodes = som_nodes
+
+        # Параметры обучения SOM
+        self.som_lr_initial = som_lr_initial
+        self.som_lr_final = som_lr_final
+
+        # Вычислим конечный радиус: половина диагонали bounding box, если не задано явно
         xs, ys = zip(*self.points)
         dx = max(xs) - min(xs)
         dy = max(ys) - min(ys)
-        self.som_radius_final = math.hypot(dx, dy) / 2.0
+        if som_radius_final is None:
+            self.som_radius_final = math.hypot(dx, dy) / 2.0
+        else:
+            self.som_radius_final = som_radius_final
+
+        # Построим матрицу расстояний между городами
         self.distance_matrix = self._compute_distance_matrix(self.points)
+
+        # Инициализируем поля для хранения результатов
         self.initial_tour = None
         self.improved_tour = None
         self.initial_length = None
@@ -40,17 +70,27 @@ class AdaptiveTSP:
         return mat
 
     def solve(self, visualize_steps=False, viz_dir=None):
-        if visualize_steps:
+        """
+        Основная процедура:
+        1) Обучение адаптивной карты (AdaptiveGrid) с пользовательскими параметрами.
+        2) Привязка узлов к городам → "сырой" тур.
+        3) 2-opt локальная оптимизация.
+        """
+        if visualize_steps and viz_dir:
             self.viz_dir = viz_dir
             os.makedirs(self.viz_dir, exist_ok=True)
 
+        # Преобразуем список точек в numpy-массив для передачи в AdaptiveGrid
         cities_np = np.array(self.points)
+        # Инициализация узлов SOM по окружности
         init_coords = self._init_som_nodes_circle(self.som_nodes, self.points)
         if visualize_steps:
             fname_init = os.path.join(self.viz_dir, "1_som_init.png")
             self._plot_som_init(fname_init, self.points, init_coords)
 
+        # Подготовка входа для AdaptiveGrid: список списков [x, y]
         grid_input = cities_np.tolist()
+        # Запуск AdaptiveGrid с параметрами из конструктора
         som = AdaptiveGrid(
             points=grid_input,
             initial_nodes=self.som_nodes,
@@ -65,16 +105,20 @@ class AdaptiveTSP:
         history = som.get_history()
 
         if visualize_steps:
+            # График убывания learning rate и radius
             fname_decay = os.path.join(self.viz_dir, "2_som_decay.png")
             self._plot_som_decay(fname_decay, history['lr_history'], history['radius_history'])
 
+            # График ошибки привязки SOM по итерациям
             fname_err_curve = os.path.join(self.viz_dir, "3_som_error_curve.png")
             self._plot_error_curve(fname_err_curve, history['error_history'])
 
+            # Снапшоты карты на нескольких итерациях
             for (iter_idx, coords_snapshot) in history['history_nodes']:
                 fname_snap = os.path.join(self.viz_dir, f"4_som_snap_iter{iter_idx:04d}.png")
                 self._plot_som_trained_snapshot(fname_snap, self.points, coords_snapshot, iter_idx)
 
+        # Привязка узлов к городам, получение "сырого" тура
         node_city_map, unassigned = self._map_nodes_to_tour(self.points, trained_coords)
         raw_tour = node_city_map + unassigned
 
@@ -85,6 +129,7 @@ class AdaptiveTSP:
         self.initial_tour = raw_tour[:]
         self.initial_length = self._tour_length(raw_tour)
 
+        # Первый раунд 2-opt
         improved = self._two_opt(raw_tour)
         improved_len = self._tour_length(improved)
 
@@ -98,9 +143,16 @@ class AdaptiveTSP:
         return self.improved_tour
 
     def get_lengths(self):
+        """
+        Возвращает кортеж (initial_length, final_length)
+        """
         return (self.initial_length, self.final_length)
 
     def save_tour(self, path):
+        """
+        Сохраняет улучшённый тур в CSV-файл в формате:
+        pos, city_index
+        """
         with open(path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(['pos', 'city'])
@@ -108,6 +160,9 @@ class AdaptiveTSP:
                 writer.writerow([idx, city])
 
     def _init_som_nodes_circle(self, n_nodes, cities_list):
+        """
+        Инициализация кольцевых узлов SOM: равномерное распределение по окружности.
+        """
         xs, ys = zip(*cities_list)
         x_min, x_max = min(xs), max(xs)
         y_min, y_max = min(ys), max(ys)
@@ -121,6 +176,12 @@ class AdaptiveTSP:
         return coords
 
     def _map_nodes_to_tour(self, cities_list, nodes, max_dist=None):
+        """
+        Привязывает каждому узлу ближайший непосещённый город (через KDTree).
+        Возвращает (ordered, unassigned):
+          ordered: список индексов городов в порядке обхода по узлам
+          unassigned: список оставшихся индексов
+        """
         tree = KDTree(cities_list)
         assigned = set()
         ordered = []
@@ -135,6 +196,9 @@ class AdaptiveTSP:
         return ordered, unassigned
 
     def _tour_length(self, tour):
+        """
+        Вычисляет длину замкнутого тура по матрице расстояний.
+        """
         total = 0.0
         for i in range(len(tour)):
             a = tour[i]
@@ -143,6 +207,9 @@ class AdaptiveTSP:
         return total
 
     def _two_opt(self, tour):
+        """
+        Классический 2-opt: пробует все пары рёбер и выполняет обмен, если улучшает длину.
+        """
         improved = True
         best = tour[:]
         best_len = self._tour_length(best)
